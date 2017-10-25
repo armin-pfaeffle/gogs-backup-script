@@ -42,7 +42,7 @@ After the initialization the script sends a "Starting backup" mail -- if `SendMa
 5. Now you can run the script manually by executing it via Windows PowerShell, or you can add a Windows task.
 
 # Run script as Windows task
-How you can add a new task [is described here](http://www.sevenforums.com/tutorials/12444-task-scheduler-create-new-task.html). The important things are to set the right parameters as application ‒ please adjust the pathes!
+How you can add a new task [is described here](http://www.sevenforums.com/tutorials/12444-task-scheduler-create-new-task.html). The important things are to set the right parameters as application ‒ please adjust the path!
 
 ```
 // Program/script:
