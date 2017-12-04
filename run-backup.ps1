@@ -2,8 +2,8 @@
 #                                                                                                 #
 #  Script for Executing Gogs Backups                                                              #
 #                                                                                                 #
-#  Version: 0.1                                                                                   #
-#  Date: 25.10.2017                                                                               #
+#  Version: 0.2                                                                                   #
+#  Date: 04.12.2017                                                                               #
 #  Author: Armin Pfäffle                                                                          #
 #  E-Mail mail@armin-pfaeffle.de                                                                  #
 #  Web: http://www.armin-pfaeffle.de                                                              #
@@ -18,79 +18,81 @@
 . .\configuration.ps1
 
 
-#
-# Logs a message to the log file and outputs it if $echo is $TRUE.
-#
-Function Log($text, $withTimestamp = $TRUE, $echo = $TRUE)
+
+Function Log($text, $withTimestamp = $true, $echo = $true)
 {
 	$line = ""
-	if ($text) {
+	If ($text) {
 		$line = [string]$text
-		if ($withTimestamp) {
+		If ($withTimestamp) {
 			$now = Get-Date
 			$line = "{0} {1}" -f $now, $line
 		}
 	}
 
 	$line >> $logFilename
-	if ($echo) {
-		Write-host $line
+	If ($echo) {
+		Write-Host $line
 	}
 }
 
-#
-# Ensures that there is log directory given by $logDirectory. If folder does not
-# exist it is created.
-#
 Function EnsureLogDirectory
 {
-	if( -not (Test-Path $logDirectory) )
+	If (!(Test-Path $logDirectory))
 	{
 		New-Item $logDirectory -type directory
 	}
 }
 
-#
-# Checks if mail credential file exists; if not asks user for credential and saves given
-# information in credential file. Password is encrypted.
-#
-Function EnsureMailCredentialFile
-{
-	If (!(Test-Path $mailCredentialFilename))
-	{
-		Log "Ask for mail credential"
-		Try {
-			$credential = Get-Credential
-		} Catch {
-			$ErrorMessage = $_.Exception.Message
-			Write-Error $ErrorMessage
-			Exit
-		}
 
-		Log "Create mail credential file"
+
+Function EnsureCredentialFile($type)
+{
+	$filename = GetCredentialFilename $type
+	If ($filename -eq "") {
+		Return "false"
+	}
+		
+	If (!(Test-Path $filename))
+	{
+		Log ("Ask for credential, type: {0}" -f $type)
+		
+		$message = GetCredentialDialogMessage $type
+		Try {
+			$credential = Get-Credential -Message $message
+			If ($credential -eq $null) {
+				Log "Cancelled"
+				Return "false"
+			}
+		} Catch {
+			Write-Error $_.Exception
+			Log $_.Exception.Message
+			Return "false"
+		}
+		
+		Log "Create credential file"
 		$encrytpedPassword = ConvertFrom-SecureString $credential.password
 		$line = "{0}|{1}" -f $credential.username, $encrytpedPassword
-		$line > $mailCredentialFilename
-
-		Log "Send test mail"
-		$result = SendMail $configuration["Mail"]["Subject"]["Test"] -ErrorAction Stop
-		if (!$result) {
-			Log "Delete credential file because of an error while sending mail. Please check you credential!"
-			Remove-Item $mailCredentialFilename
-		}
-
-		Exit
+		$line > $filename
+		Return "created"
 	}
+	Return "existant"
 }
 
-#
-# Returns date from mail credential file and returns PSCredential instance.
-#
-Function GetMailCredential
+Function GetCredentialFromFile($type)
 {
-	Log "Load mail credential"
+	$filename = GetCredentialFilename $type
+	If ($filename -eq "") {
+		Log "Invalid credential type"
+		Return $false
+	}
+	
+	If (!(Test-Path($filename))) {
+		Log "Credential file does not exist"
+		Return $false
+	}
 
-	$line = Get-Content $mailCredentialFilename
+	$line = Get-Content $filename
 	$rawCredential = $line.Split("|")
 	$username = $rawCredential[0]
 	$password = ConvertTo-SecureString $rawCredential[1]
@@ -98,27 +100,65 @@ Function GetMailCredential
 	Return $credential
 }
 
-#
-# Sends mail with given subject. Adds additional text to body if $additionalBody is set.
-#
-Function SendMail($subject, $body = "", $prependScriptStartAndEndTimestamp = $TRUE)
+Function GetCredentialFilename($type)
 {
-	Log ("Sending mail '{0}'" -f $subject)
+	$filename = ""
+	switch ($type) 
+    { 
+        "mail" { $filename = $mailCredentialFilename }
+        "ssh"  { $filename = $sshCredentialFilename  }
+		default { Log ("Invalid credential type: {0}" -f $type) }
+	}
+	Return $filename
+}
 
-	$credential = GetMailCredential
+Function GetCredentialDialogMessage($type)
+{
+	$message = $null
+	switch ($type) 
+    { 
+        "mail" { $message = "Enter the MAIL credential:" }
+        "ssh"  { $message = "Enter the SSH credential:"  }
+		default { Log ("Invalid credential type: {0}" -f $type) }
+	}
+	Return $message
+}
 
-	# Gather all needed server information
+
+
+Function TestMailCredential
+{
+	Log "Send test mail"
+	$result = SendMail $configuration["Mail"]["Subject"]["Test"] " " $false
+	If (!$result) {
+		$filename = GetCredentialFilename "mail"
+		If ($filename -and (Test-Path $filename)) {
+			Log "Delete credential file because of an error while sending mail. Please check your credential!"
+			Remove-Item $filename
+		}
+		Return $false
+	}
+	Return $true
+}
+
+Function SendMail($subject, $body = "", $prependScriptStartAndEndTimestamp = $true)
+{
+	Log ("Send mail '{0}'" -f $subject)
+
+	$credential = GetCredentialFromFile "mail"
+	If ($credential -eq $false) {
+		Return $false
+	}
+
 	$mail = $configuration["Mail"];
 	$from = $mail["From"]
 	$to = $mail["To"]
 	$server = $mail["Server"]
 
-	# Obtain subject and body
-	if ($mail["Subject"]["Prefix"]) {
+	If ($mail["Subject"]["Prefix"]) {
 		$subject = "{0} {1}" -f $mail["Subject"]["Prefix"], $subject
 	}
-
-	if ($prependScriptStartAndEndTimestamp) {
+	If ($prependScriptStartAndEndTimestamp) {
 		$currentTimestamp = Get-Date
 		$body = "Skript started: {0}`nSkript ended: {1}`n`n{2}" -f $scriptStartedTimestamp, $currentTimestamp, $body
 	}
@@ -127,147 +167,30 @@ Function SendMail($subject, $body = "", $prependScriptStartAndEndTimestamp = $TR
 	[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { return $true }
 
 	Try {
+		Log ("Sending mail -- from: {0}, to: {1}, server: {2}" -f $from, $to, $server)
 		Send-MailMessage -From $from -To $to -Subject $subject -Body $body -SmtpServer $server -Credential $credential -UseSsl -ErrorAction Stop
-		Return $TRUE
+		Return $true
 	} Catch {
 		Write-Error $_.Exception
-		Return $FALSE
+		Log $_.Exception.Message
+		Return $false
 	}
-
 }
 
-#
-# Changes working directory to Backup Client directory, then runs the Backup Client
-# and finally returns to the original working directory.
-#
-Function RunBackup
+Function PrepareBackupMailBody($successful, $backupOutput)
 {
-	Log "Executing backup"
-
-	$gogs = $configuration["Gogs"]
-	$options = $gogs["Options"]
-	
-	$executable = "{0} backup" -f $gogs["Executable"]
-
-	if ($options["Config"]) {
-		$executable = "{0} --config ""{1}""" -f $executable, $options["Config"]
-	}
-	if ($options["Verbose"]) {
-		$executable = $executable + " --verbose"
-	}
-	if ($options["TempDir"]) {
-		$executable = "{0} --tempdir ""{1}""" -f $executable, $options["TempDir"]
-	}
-	if ($options["Target"]) {
-		$executable = "{0} --target ""{1}""" -f $executable, $options["Target"]
-	}
-	if ($options["ArchiveName"]) {
-		$executable = "{0} --archive-name ""{1}""" -f $executable, $options["ArchiveName"]
-	}
-	if ($options["DatabaseOnly"]) {
-		$executable = $executable + " --database-only"
-	}
-	if ($options["ExcludeRepositories"]) {
-		$executable = $executable + " --exclude-repos"
-	}
-	
-	Log ("Calling: " + $executable)	
-		
-	Try {
-		$output = (Invoke-Expression $executable 2>&1) | Out-String
-		$output = "Calling: " + $executable + "`n`n" + $output
-	} Catch {
-		$ErrorMessage = $_.Exception.Message
-		Write-Error $ErrorMessage
-		$output = "Exception: " + $ErrorMessage
-	}
-	
-	Log $output $FALSE
-
-	Return $output
-}
-
-#
-# Returns the file size in a human readable size. If file could not be extracted from mail output
-# or file does not exist, then $FALSE is returned.
-#
-Function GetBackupFileSize($backupOutput)
-{
-	$filename = GetBackupFilename $backupOutput
-	if (Test-Path $filename) {
-		$fileSize = (Get-Item $filename).length # in KB
-		Return FormatFileSize $fileSize
-	}
-	Return $FALSE
-}
-
-#
-# Formats file size so it is readable for humans.
-#
-Function FormatFileSize($size)
-{
-    If     ($size -gt 1TB) { Return "{0:0.00} TB" -f ($size / 1TB) }
-    ElseIf ($size -gt 1GB) { Return "{0:0.00} GB" -f ($size / 1GB) }
-    ElseIf ($size -gt 1MB) { Return "{0:0.00} MB" -f ($size / 1MB) }
-    ElseIf ($size -gt 1KB) { Return "{0:0.00} kB" -f ($size / 1KB) }
-    ElseIf ($size -gt 0)   { Return "{0:0.00} B" -f $size }
-    Else                   { Return "" }
-}
-
-#
-# Returns free disk space of partition where backup is stored.
-#
-Function GetFreeDiskSpace($backupOutput)
-{
-	$filename = GetBackupFilename $backupOutput
-	if ($filename -ne $FALSE) {
-		Try {
-			$qualifier = split-path $filename -qualifier
-			$filter = "name='{0}'" -f $qualifier
-			$diskSpace = Get-WMIObject Win32_LogicalDisk -filter $filter | select freespace
-			$freeDiskSpace = FormatFileSize $diskSpace.freespace
-			Return $freeDiskSpace
-		} Catch {
-			$ErrorMessage = $_.Exception.Message
-			Write-Error $ErrorMessage
-		}
-	}
-	Return $FALSE
-}
-
-#
-# Extracts filename of backup from backup process output.
-#
-Function GetBackupFilename($backupOutput)
-{
-	$pattern = "Archive is located at: (.*?)\.zip"
-	$regex = [regex] $pattern
-	$match = $regex.Match($backupOutput)
-	if ($match.Success -and ($match.Groups.Count -gt 1)) {
-		$filename = "{0}.zip" -f $match.Groups[1]
-		Return $filename
-	}
-	Return $FALSE
-}
-
-#
-# Prepares the body for the final notification mail. Adds the computername and the backup
-# file size if backup was successful.
-#
-Function PrepareMailBody($successful, $backupOutput)
-{
-	if (!$configuration["Mail"]["AddLogToBody"]) {
+	If (!$configuration["Mail"]["AddLogToBody"]) {
 		$body = ""
 	} Else {
 		$computername = gc env:computername
 		$body = "Computername: {0}" -f $computername
 
-		if ($successful) {
+		If ($successful) {
 			$fileSize = GetBackupFileSize $backupOutput
 			$body = "{0}`nSize of backup: {1}" -f $body, $fileSize
 			
 			$freeDiskSpace = GetFreeDiskSpace $backupOutput
-			if ($freeDiskSpace -ne $FALSE) {
+			If ($freeDiskSpace -ne $false) {
 				$filename = GetBackupFilename $backupOutput
 				Log $filename;
 				$qualifier = split-path $filename -qualifier
@@ -283,40 +206,304 @@ Function PrepareMailBody($successful, $backupOutput)
 }
 
 
+
+Function CheckPoshSSHInstallation
+{
+	If (!(Get-Module -ListAvailable -Name Posh-SSH)) {
+		Log "You must install Posh-SSH before you can use SSH upload. Use command 'Find-Module Posh-SSH | Install-Module' in administrator mode to install this module."
+		Return $false
+	}
+	Return $true
+}
+
+Function TestSSHCredentials
+{
+	Log "Test SSH connection"
+	
+	If (!(CheckPoshSSHInstallation)) {
+		Return $false
+	}
+
+	$credential = GetCredentialFromFile "ssh"
+	If ($credential -eq $false) {
+		Return $false
+	}
+	
+	$computerName = $configuration["UploadToSSH"]["ComputerName"]
+	$result = New-SSHSession -ComputerName $computerName -Credential $credential
+	If ($?) {
+		Log "SSH connection successfully tested"
+		Remove-SSHSession -Index 0
+		Return $true
+	}
+	else {
+		Log ("SSH connecting failed: {0}" -f $error[0].ToString())
+		$filename = GetCredentialFilename "ssh"
+		If ($filename -and (Test-Path $filename)) {
+			Log "Delete credential file because of an error while testing SSH access. Please check your credential!"
+			Remove-Item $filename
+		}
+		Return $false
+	}
+}
+
+Function UploadToSSH($backupOutput)
+{
+	Log "Start SSH upload"
+	
+	If (!(CheckPoshSSHInstallation)) {
+		Return $false
+	}
+	
+	$credential = GetCredentialFromFile "ssh"
+	If ($credential -eq $false) {
+		Return $false
+	}
+	
+	$backupFilename = GetBackupFilename $backupOutput
+	$remotePath = $configuration["UploadToSSH"]["TargetDirectory"]
+	$computerName = $configuration["UploadToSSH"]["ComputerName"]
+	
+	Try {
+		Set-SCPFile -LocalFile $backupFilename -RemotePath $remotePath -ComputerName $computerName -Credential $credential
+		If ($?) {
+			Log "File successfully transfered"
+			Remove-SSHSession -Index 0
+			Return $true
+		}
+		else {
+			$errorMessage = "SSH upload failed: {0}" -f $error[0].ToString()
+			Log $errorMessage
+			Return $errorMessage
+		}
+	}
+	Catch {
+		Write-Error $_.Exception
+		Log $_.Exception.Message
+		Return $_.Exception.Message
+	}
+}
+
+Function DeleteLocalBackupFile($backupOutput)
+{
+	$backupFilename = GetBackupFilename $backupOutput
+	If ($backupFilename -and (Test-Path $backupFilename)) {
+		Log "Delete local backup file"
+		Remove-Item $backupFilename
+	}
+}
+
+
+
+Function RunBackup
+{
+	Log "Executing backup"
+
+	$executable = PrepareBackupExecutableString
+	Log ("Calling: " + $executable)	
+		
+	Try {
+		$output = (Invoke-Expression $executable 2>&1) | Out-String
+		$output = "Calling: " + $executable + "`n`n" + $output
+	} Catch {
+		Write-Error $_.Exception
+		$output = "Exception: " + $_.Exception.Message
+	}
+	
+	Log $output $false
+
+	Return $output
+}
+
+Function PrepareBackupExecutableString
+{
+	$gogs = $configuration["Gogs"]
+	$options = $gogs["Options"]
+	
+	$executable = "{0} backup" -f $gogs["Executable"]
+
+	If ($options["Config"]) {
+		$executable = "{0} --config ""{1}""" -f $executable, $options["Config"]
+	}
+	If ($options["Verbose"]) {
+		$executable = $executable + " --verbose"
+	}
+	If ($options["TempDir"]) {
+		$executable = "{0} --tempdir ""{1}""" -f $executable, $options["TempDir"]
+	}
+	If ($options["Target"]) {
+		$executable = "{0} --target ""{1}""" -f $executable, $options["Target"]
+	}
+	If ($options["ArchiveName"]) {
+		$executable = "{0} --archive-name ""{1}""" -f $executable, $options["ArchiveName"]
+	}
+	If ($options["DatabaseOnly"]) {
+		$executable = $executable + " --database-only"
+	}
+	If ($options["ExcludeRepositories"]) {
+		$executable = $executable + " --exclude-repos"
+	}
+	
+	Return $executable
+}
+
+
+
+Function GetBackupFileSize($backupOutput)
+{
+	$filename = GetBackupFilename $backupOutput
+	If (Test-Path $filename) {
+		$fileSize = (Get-Item $filename).length # in KB
+		Return FormatFileSize $fileSize
+	}
+	Return $false
+}
+
+Function FormatFileSize($size)
+{
+    If    ($size -gt 1TB) { Return "{0:0.00} TB" -f ($size / 1TB) }
+    ElseIf ($size -gt 1GB) { Return "{0:0.00} GB" -f ($size / 1GB) }
+    ElseIf ($size -gt 1MB) { Return "{0:0.00} MB" -f ($size / 1MB) }
+    ElseIf ($size -gt 1KB) { Return "{0:0.00} kB" -f ($size / 1KB) }
+    ElseIf ($size -gt 0)   { Return "{0:0.00} B" -f $size }
+    Else                   { Return "" }
+}
+
+Function GetFreeDiskSpace($backupOutput)
+{
+	$filename = GetBackupFilename $backupOutput
+	If ($filename -ne $false) {
+		Try {
+			$qualifier = split-path $filename -qualifier
+			$filter = "name='{0}'" -f $qualifier
+			$diskSpace = Get-WMIObject Win32_LogicalDisk -filter $filter | select freespace
+			$freeDiskSpace = FormatFileSize $diskSpace.freespace
+			Return $freeDiskSpace
+		} Catch {
+			Write-Error $_.Exception
+			Log $_.Exception.Message
+		}
+	}
+	Return $false
+}
+
+Function GetBackupFilename($backupOutput)
+{
+	$pattern = "Archive is located at: (.*?)\.zip"
+	$regex = [regex] $pattern
+	$match = $regex.Match($backupOutput)
+	If ($match.Success -and ($match.Groups.Count -gt 1)) {
+		$filename = "{0}.zip" -f $match.Groups[1]
+		Return $filename
+	}
+	Return $false
+}
+
+
+
 ###################################################################################################
 
 
+
 $scriptStartedTimestamp = Get-Date
-$mailCredentialFilename = ".\backup-client.mail-credential"
+$today = Get-Date -UFormat "%Y%m%d"
+
+$mailCredentialFilename = ".\credential.mail"
+$sshCredentialFilename = ".\credential.ssh"
 
 $currentDirectory = $(get-location)
 $logDirectory = "{0}\log" -f $currentDirectory
-
-$today = Get-Date -UFormat "%Y%m%d"
 $logFilename = "{0}\{1}.log" -f $logDirectory, $today
 
+
+# Prepare log and mail/ssh configuration
 EnsureLogDirectory
 
-if ($configuration["SendMailBeforeBackup"] -or $configuration["SendMailAfterBackup"]) {
-	EnsureMailCredentialFile
+$newCredentialCreated = $false;
+If ($configuration["SendMailBeforeBackup"] -or $configuration["SendMailAfterBackup"] -or $configuration["SendMailBeforeSSHUpload"] -or $configuration["SendMailAfterSSHUpload"]) {
+	$result = EnsureCredentialFile "mail"
+	If ($result -eq "false") {
+		Exit 1
+	}
+	If ($result -eq "created") {
+		If (!(TestMailCredential)) {
+			Exit 1
+		}
+		$newCredentialCreated = $true
+	}
+}
+If ($configuration["UploadToSSH"]) {
+	$result = EnsureCredentialFile "ssh"
+	If ($result -eq "false") {
+		Exit 1
+	}
+	If ($result -eq "created") {
+		If (!(TestSSHCredentials)) {
+			Exit 1
+		}
+		$newCredentialCreated = $true
+	}
+}
+If ($newCredentialCreated) {
+	Log "New credential successfully created. Please execute script again to start backup."
+	Exit 0
 }
 
-if ($configuration["SendMailBeforeBackup"]) {
-	$sendResult = SendMail $configuration["Mail"]["Subject"]["Start"] " " $FALSE
-}
 
+# Start backup, with before and after notifications
+If ($configuration["SendMailBeforeBackup"]) {
+	$sendResult = SendMail $configuration["Mail"]["Subject"]["Start"] " " $false
+}
 
 $backupOutput = RunBackup
+$backupSuccessful = !($backupOutput -match " \[FATAL\] ")
 
-if ($configuration["SendMailAfterBackup"]) {
-	if ($backupOutput -match " \[FATAL\] ") {
+If ($configuration["SendMailAfterBackup"]) {
+	If ($backupOutput -match " \[FATAL\] ") {
 		$subject = $configuration["Mail"]["Subject"]["Error"]
-		$successful = $FALSE
 	} Else {
 		$subject = $configuration["Mail"]["Subject"]["Success"]
-		$successful = $TRUE
 	}
-		
-	$body = PrepareMailBody $successful $backupOutput
+
+	$body = PrepareBackupMailBody $backupSuccessful $backupOutput
 	$sendResult = SendMail $subject $body
 }
+
+
+# Upload backup file to other computer via SSH
+If ($backupSuccessful -and $configuration["UploadToSSH"]) {
+	If ($configuration["SendMailBeforeSSHUpload"]) {
+		$sendResult = SendMail $configuration["Mail"]["Subject"]["SSHStart"] " " $false
+	}
+	
+	$sshUploadOutput = UploadToSSH $backupOutput
+	if ($sshUploadOutput -eq $true) {
+		If ($configuration["UploadToSSH"]["DeleteAfterUpload"] -eq $true) {
+			DeleteLocalBackupFile $backupOutput
+		}
+		
+		If ($configuration["SendMailAfterSSHUpload"]) {
+			$sshConfig = $configuration["UploadToSSH"]
+			$message = "Copied backup to: {0}:{1}" -f $sshConfig["ComputerName"], $sshConfig["TargetDirectory"]
+			If ($sshConfig["DeleteAfterUpload"]) {
+				$message = $message + "`n... and deleted local backup."
+			}
+			$sendResult = SendMail $configuration["Mail"]["Subject"]["SSHSuccess"] $message $false
+		}
+	}
+	Else {
+		$errorMessage = ""
+		if ($sshUploadOutput -ne $false) {
+			Write-Error $sshUploadOutput
+			Log $sshUploadOutput
+			$errorMessage = $sshUploadOutput
+		}
+		
+		If ($configuration["SendMailAfterSSHUpload"]) {
+			$sendResult = SendMail $configuration["Mail"]["Subject"]["SSHError"] $sshUploadOutput $false
+		}
+		Exit 1
+	}
+}
+
+Exit 0

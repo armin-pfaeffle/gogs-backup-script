@@ -1,7 +1,8 @@
-Bitbucket Server Client Script
+
+Gogs Backup Script
 ==========================
 
-This simple script runs a the internal backup function of [Gogs](https://gogs.io/) and can send notifications via email.
+This simple script runs the CLI backup function of [Gogs](https://gogs.io/), accompanied by notification e-mails. Since version 0.2 successfully created backups can be uploaded to another computer via SSH.
 
 ## Contents
 
@@ -9,10 +10,11 @@ This simple script runs a the internal backup function of [Gogs](https://gogs.io
 	1. [Features](#features)
 	2. [What does this script exactly do?](#what-does-this-script-exactly-do)
 2. [Installation](#installation)
-3. [Run script as Windows task](#run-script-as-windows-task)
-1. [FAQ](#faq)
-1. [Changelog](https://github.com/armin-pfaeffle/gogs-backup-script/blob/master/CHANGELOG.md)
-1. [Author](#author)
+	1. [General](#general)
+	2. [Run as Windows task](#run-script-as-windows-task)
+3. [FAQ](#faq)
+4. [Changelog](https://github.com/armin-pfaeffle/gogs-backup-script/blob/master/CHANGELOG.md)
+5. [Author & License](#author--license)
 
 
 # Overview
@@ -20,38 +22,43 @@ This simple script runs a the internal backup function of [Gogs](https://gogs.io
 ## Features
 
 * Configurable script for running Gogs backup command
-* Send notification mail before starting and after finishing script (with backup log, optional)
-* Simple mail credential configuration with test mail
+* Send notification mail before starting and after finishing script/uploading backup via SSH
+* Simple mail and SSH credential configuration
+* Upload backup ZIP file to another computer via SSH after successful backup
 
 
 ## What does this script exactly do?
 
-First of all the script loads the `configuration.ps1` file, so prepare that **before** using the script! After that it ensures that there is a `log`directory so the script can wirte log files ‒ one log file for each day the script is executed.
+First of all the script loads the `configuration.ps1` file, so prepare that **before** using the script (see [installation](#installation)! After that it ensures that there is a `log` directory so the script can write log files ‒ one log file for each day.
 
-In the next step it checks for file existance of `backup-client.mail-credential` where mail credential are saved to. This file only exists, if at least `SendMailBeforeBackup` or `SendMailAfterBackup` is set to `$TRUE` because only then an e-mail notifications are sent. If file does not exist, the script asks for mail credential, saves it and sends a test mail. If sending fails, credential file is deleted. If everything is fine script quits, so you have to run it again to execute backup.
+Next step is to check for file existance of `credential.mail` resp. `credential.ssh` in which mail/SSH credential are saved. These files only exists, if at least `SendMailBeforeBackup` or `SendMailAfterBackup` resp. `SendMailBeforeSSHUpload` or `SendMailAfterSSHUpload` is set to `$true`, because only then e-mail notifications are sent. If files do not exist, the script asks for mail or SSH credential, saves the input (password is encrypted) and starts a test -- sends a test mail resp. tries SSH connection. If a test fails, credential file is deleted and you have to start script again to re-enter correct username and password. If everything is fine script quits, so you have to run it again to execute backup.
 
-After the initialization the script sends a "Starting backup" mail -- if `SendMailBeforeBackup` is set to `$TRUE` -- so you know that the backup is executed. After running the backup you will receive a success or error notification, depending on the result of the backup process. Furthermore the complete output is written to a daily log file.
+After the initialization the script sends a »Starting backup« mail -- if `SendMailBeforeBackup` is set to `$true` -- so you know that the backup is executed. After running the backup you will receive a success or error notification, depending on the result of the backup process. Furthermore the complete output is written to a daily log file. If you have enabled `UploadToSSH`, the upload process is startet, accompanied by notification e-mails. ■
 
 
 # Installation
 
+## General
+
 1. Put the script files `run-backup.ps1` and `configuration.ps1` anywhere on your computer.
-2. Ensure that it has write rights to the directory because it writes log files.
-3. Open `configuration.ps1` modify it for you needs. If you don't want to receive reports via E-Mail set `SendMailBeforeBackup` and `SendMailAfterBackup` to `$FALSE` and you can ignore the `Mail`section.
-4. If you want to receive E-Mails you have to run the script via Windows PowerShell **before** you can use it as backup script. The reason for this is that it asks you for username and password for the mail server and stores this data to a file `backup-client.mail-credential`. So script can access mail credential and send mails automatically. After entering credential you receive a test mail and the script quits.
-5. Now you can run the script manually by executing it via Windows PowerShell, or you can add a Windows task.
+2. Ensure that it has write rights to the directory, because it writes log files.
+3. Open `configuration.ps1` and modify it for you needs. If you don't want to receive notifications via e-mail set `SendMailBeforeBackup`, `SendMailAfterBackup`, `SendMailBeforeSSHUpload` and `SendMailAfterSSHUpload` to `$false` and you can ignore the `Mail`section.
+4. If you setup configuration to receive notifications, you have to run the script via Windows PowerShell **before** you can use it as backup script because it asks you for mail/SSH credentail.
+5. Now you can run the script manually by executing it via Windows PowerShell, or you can add a [Windows task](#run-script-as-windows-task).
 
-# Run script as Windows task
-How you can add a new task [is described here](http://www.sevenforums.com/tutorials/12444-task-scheduler-create-new-task.html). The important things are to set the right parameters as application ‒ please adjust the path!
 
-```
-// Program/script:
+## Run as Windows task
+
+[This tutorial](http://www.sevenforums.com/tutorials/12444-task-scheduler-create-new-task.html) describes how to add a new Windows task . The important things are to set the right parameters as application ‒ please adjust the path!
+
+```powershell
+# Program/script:
 C:\WINDOWS\system32\WindowsPowerShell\v1.0\powershell.exe
 
-// Add arguments (optional):
+# Add arguments (optional):
 -NoLogo -NonInteractive -File "C:\gogs\backup\run-backup.ps1"
 
-// Start in (optional):
+# Start in (optional):
 C:\gogs\backup
 ```
 
@@ -60,12 +67,18 @@ C:\gogs\backup
 
 1. Can I send the notification mails to more than one e-mail address?
 
-    Yes you can! In the `configuration.ps1` you can see the option `To` in the `Mail` group. There you can set at least one e-mail address or set more than one by separating them via a comma, e.g. the line can look like `"To" = "first@example.com, second@example.com, third@example.com";`.
+    Yes, you can! In the `configuration.ps1` you can see the option `To` in the `Mail` section. You can set this option to comma separated addresses, e.g.: `"To" = "first@example.com, second@example.com, third@example.com";`
+
+2. Why do my entered credential do not work after update to version 0.2?
+
+	I changed the filename for the mail credential file from `backup-client.mail-credential` to `credential.mail`, so it's better readable and because of consistence reasons. Rename your existant credentail or re-run script to generate a new credential file.
+
+When you have any further questions, please contact me via E-Mail [mail@armin-pfaeffle.de](mailto:mail@armin-pfaeffle.de)!
 
 
-When you habe any further questions, please contact me via E-Mail [mail@armin-pfaeffle.de](mailto:mail@armin-pfaeffle.de)!
-
-
-### Author
+# Author & License
 
 Armin Pfäffle ‒ [www.armin-pfaeffle.de](http://www.armin-pfaeffle.de) ‒ [mail@armin-pfaeffle.de](mailto:mail@armin-pfaeffle.de)
+
+Licensed under the [MIT License](https://github.com/armin-pfaeffle/gogs-backup-script/blob/master/LICENSE.md).
+

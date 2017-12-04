@@ -1,20 +1,30 @@
-
 $configuration = @{
+	# General settings
 	"Gogs" = @{
 		"Executable" = "C:\gogs\gogs.exe";
 		"Options" = @{		
 			# "Config" = "custom/conf/app.ini";
-			"Verbose" = $TRUE;
+			"Verbose" = $true;
 			# "TempDir" = "";
 			"Target" = "C:\gogs\backup";
 			# "ArchiveName" = "";
-			#"DatabaseOnly" = $TRUE;
-			#"ExcludeRepositories" = $TRUE;
+			# "DatabaseOnly" = $true;
+			# "ExcludeRepositories" = $true;
 		};
 	};
+	"SendMailBeforeBackup" = $true;
+	"SendMailAfterBackup" = $true;
 	
-	"SendMailBeforeBackup" = $TRUE;
-	"SendMailAfterBackup" = $TRUE;
+	# SSH configuration for SSH upload
+	#"UploadToSSH" = @{
+	#	"ComputerName" = "raspberrypi";
+	#	"TargetDirectory" = "/media/usb/backups/gogs/";
+	#	"DeleteAfterUpload" = $false;
+	#};
+	#"SendMailBeforeSSHUpload" = $true;
+	#"SendMailAfterSSHUpload" = $true;
+	
+	# Mail configuration
 	"Mail" = @{
 		"From" = "from@example.com";
 		"To" = "to@example.com";
@@ -27,7 +37,11 @@ $configuration = @{
 			"Start" = "Starting backup";
 			"Success" = "Successful";
 			"Error" = "Error";
+			
+			"SSHStart" = "Starting SSH upload";
+			"SSHSuccess" = "SSH upload successful";
+			"SSHError" = "SSH upload error";
 		};
-		"AddLogToBody" = $TRUE;
+		"AddLogToBody" = $true;
 	};
 }
